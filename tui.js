@@ -9,10 +9,22 @@ import fs from "fs/promises";
 import path from "path";
 
 export async function runTUI(config) {
-  const screen = blessed.screen({
-    smartCSR: true,
-    title: "Code Contextor",
-  });
+  let screen;
+  try {
+    screen = blessed.screen({
+      smartCSR: true,
+      title: "Code Contextor",
+    });
+  } catch (error) {
+    logger.error("Failed to create blessed screen:", error.message);
+    console.error(
+      "Your terminal might not be fully compatible with the TUI mode.",
+    );
+    console.error(
+      "Please try running in non-interactive mode with --non-interactive flag.",
+    );
+    process.exit(1);
+  }
 
   const layout = createLayout(screen);
   let files = [];
@@ -58,7 +70,8 @@ export async function runTUI(config) {
 }
 
 function createLayout(screen) {
-  const layout = {
+  return {
+    screen,
     fileTree: blessed.box({
       parent: screen,
       left: 0,
@@ -97,8 +110,6 @@ function createLayout(screen) {
       content: "Ready",
     }),
   };
-
-  return layout;
 }
 
 function updateFileTree(layout, files) {
