@@ -1,0 +1,48 @@
+{
+  "name": "code-contextor",
+  "version": "0.1.0",
+  "description": "A tool to extract context from code repositories for use with language models",
+  "main": "app.js",
+  "type": "module",
+  "scripts": {
+    "start": "node app.js",
+    "build": "pkg .",
+    "check-versions": "npx npm-check-updates",
+    "update-versions": "npx npm-check-updates -u && npm install",
+    "validate": "npm audit && npm run build"
+  },
+  "keywords": [
+    "code",
+    "context",
+    "nlp",
+    "language-model"
+  ],
+  "author": "Allison Durham",
+  "license": "MIT",
+  "dependencies": {
+    "@xenova/transformers": "^2.17.2",
+    "commander": "^12.1.0",
+    "ignore": "^5.3.1"
+  },
+  "devDependencies": {
+    "npm-check-updates": "^16.14.20",
+    "pkg": "^5.8.1"
+  },
+  "bin": {
+    "code-contextor": "./app.js"
+  },
+  "pkg": {
+    "targets": [
+      "node18-linux-x64",
+      "node18-macos-x64",
+      "node18-win-x64"
+    ],
+    "outputPath": "dist",
+    "assets": [
+      "node_modules/@xenova/transformers/**/*"
+    ]
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
