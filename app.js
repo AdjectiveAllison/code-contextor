@@ -3,7 +3,7 @@ import { program } from "commander";
 import { runCLI } from "./cli.js";
 import { runTUI } from "./tui.js";
 import { loadConfig } from "./utils/config.js";
-import { logger } from "./utils/logger.js";
+import { logger, LOG_LEVELS } from "./utils/logger.js";
 
 async function main() {
   try {
@@ -45,10 +45,18 @@ async function main() {
         "Dot files/directories to include (comma-separated)",
       )
       .option("--non-interactive", "Run in non-interactive mode")
+      .option(
+        "--log-level <level>",
+        "Set log level (ERROR, WARN, INFO, DEBUG)",
+        "INFO",
+      )
       .parse(process.argv);
 
     const options = program.opts();
     const config = loadConfig(options);
+
+    // Set log level based on command line option
+    logger.setLogLevel(options.logLevel);
 
     logger.info("Code Contextor starting...");
     logger.info(
@@ -59,7 +67,9 @@ async function main() {
     if (config.nonInteractive) {
       await runCLI(config);
     } else {
+      logger.info("Starting TUI mode...");
       await runTUI(config);
+      logger.info("TUI mode ended.");
     }
 
     logger.info("Code Contextor finished successfully");

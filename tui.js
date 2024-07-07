@@ -11,11 +11,13 @@ import path from "path";
 export async function runTUI(config) {
   let screen;
   try {
+    logger.switchToTUIMode();
     screen = blessed.screen({
       smartCSR: true,
       title: "Code Contextor",
     });
   } catch (error) {
+    logger.switchToConsoleMode();
     logger.error("Failed to create blessed screen:", error.message);
     console.error(
       "Your terminal might not be fully compatible with the TUI mode.",
@@ -30,7 +32,10 @@ export async function runTUI(config) {
   let files = [];
   let filteredFiles = [];
 
-  screen.key(["escape", "q", "C-c"], () => process.exit(0));
+  screen.key(["escape", "q", "C-c"], () => {
+    logger.switchToConsoleMode();
+    process.exit(0);
+  });
   screen.key("?", () => showHelp(screen));
 
   try {
@@ -62,6 +67,14 @@ export async function runTUI(config) {
       filterResult,
     );
 
+    // Start log update interval
+    const logUpdateInterval = setInterval(() => updateLogView(layout), 1000);
+
+    screen.on("destroy", () => {
+      clearInterval(logUpdateInterval);
+      logger.switchToConsoleMode();
+    });
+
     screen.render();
   } catch (error) {
     logger.error("An error occurred:", error.message);
@@ -77,7 +90,7 @@ function createLayout(screen) {
       left: 0,
       top: 0,
       width: "50%",
-      height: "100%-3",
+      height: "70%",
       border: { type: "line" },
       label: " File Tree ",
       keys: true,
@@ -92,11 +105,23 @@ function createLayout(screen) {
       right: 0,
       top: 0,
       width: "50%",
-      height: "100%-3",
+      height: "70%",
       border: { type: "line" },
       label: " Info ",
       content: "Select a file or directory for more information",
       padding: 1,
+      scrollable: true,
+      alwaysScroll: true,
+      scrollbar: { ch: " ", bg: "cyan" },
+    }),
+    logView: blessed.log({
+      parent: screen,
+      bottom: 3,
+      left: 0,
+      width: "100%",
+      height: "30%-3",
+      border: { type: "line" },
+      label: " Logs ",
       scrollable: true,
       alwaysScroll: true,
       scrollbar: { ch: " ", bg: "cyan" },
@@ -137,6 +162,17 @@ function updateStatus(layout, message) {
 function updateInfo(layout, content) {
   layout.info.setContent(content);
   layout.screen.render();
+}
+
+function updateLogView(layout) {
+  const tuiHandler = logger.getTUIHandler();
+  if (tuiHandler) {
+    const latestLogs = tuiHandler.getLatestLogs(10);
+    latestLogs.forEach((log) => {
+      layout.logView.log(log.message);
+    });
+    layout.screen.render();
+  }
 }
 
 function getInfoContent(config, files, filteredFiles, filterResult) {

@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { TUILogHandler } from "./TUILogHandler.js";
 
 // Define log levels
 const LOG_LEVELS = {
@@ -14,38 +15,72 @@ let currentLogLevel = LOG_LEVELS.INFO;
 // Create a timestamp string
 const getTimestamp = () => new Date().toISOString();
 
+// Store console handlers and TUI handler
+let consoleHandlers = {
+  error: console.error,
+  warn: console.warn,
+  info: console.log,
+  debug: console.log,
+};
+let tuiHandler = null;
+
+// Helper function to format log messages
+const formatLogMessage = (level, message, args) => {
+  const timestamp = getTimestamp();
+  let formattedMessage = `[${level}] ${timestamp} - ${message}`;
+  if (args.length > 0) {
+    formattedMessage +=
+      " " +
+      args
+        .map((arg) => (typeof arg === "object" ? JSON.stringify(arg) : arg))
+        .join(" ");
+  }
+  return formattedMessage;
+};
+
 // Main logger object
 export const logger = {
   error: (message, ...args) => {
     if (currentLogLevel >= LOG_LEVELS.ERROR) {
-      console.error(
-        chalk.red(`[ERROR] ${getTimestamp()} - ${message}`),
-        ...args,
-      );
+      const formattedMessage = formatLogMessage("ERROR", message, args);
+      if (tuiHandler) {
+        tuiHandler.log("ERROR", formattedMessage);
+      } else {
+        consoleHandlers.error(chalk.red(formattedMessage));
+      }
     }
   },
 
   warn: (message, ...args) => {
     if (currentLogLevel >= LOG_LEVELS.WARN) {
-      console.warn(
-        chalk.yellow(`[WARN] ${getTimestamp()} - ${message}`),
-        ...args,
-      );
+      const formattedMessage = formatLogMessage("WARN", message, args);
+      if (tuiHandler) {
+        tuiHandler.log("WARN", formattedMessage);
+      } else {
+        consoleHandlers.warn(chalk.yellow(formattedMessage));
+      }
     }
   },
 
   info: (message, ...args) => {
     if (currentLogLevel >= LOG_LEVELS.INFO) {
-      console.log(chalk.blue(`[INFO] ${getTimestamp()} - ${message}`), ...args);
+      const formattedMessage = formatLogMessage("INFO", message, args);
+      if (tuiHandler) {
+        tuiHandler.log("INFO", formattedMessage);
+      } else {
+        consoleHandlers.info(chalk.blue(formattedMessage));
+      }
     }
   },
 
   debug: (message, ...args) => {
     if (currentLogLevel >= LOG_LEVELS.DEBUG) {
-      console.log(
-        chalk.gray(`[DEBUG] ${getTimestamp()} - ${message}`),
-        ...args,
-      );
+      const formattedMessage = formatLogMessage("DEBUG", message, args);
+      if (tuiHandler) {
+        tuiHandler.log("DEBUG", formattedMessage);
+      } else {
+        consoleHandlers.debug(chalk.gray(formattedMessage));
+      }
     }
   },
 
@@ -65,6 +100,30 @@ export const logger = {
       (key) => LOG_LEVELS[key] === currentLogLevel,
     );
   },
+
+  // Switch to TUI logging mode
+  switchToTUIMode: () => {
+    if (!tuiHandler) {
+      tuiHandler = new TUILogHandler();
+    }
+    logger.info("Switching to TUI logging mode");
+  },
+
+  // Switch back to console logging mode
+  switchToConsoleMode: () => {
+    if (tuiHandler) {
+      // Log any remaining messages in the TUI buffer
+      const buffer = tuiHandler.getBuffer();
+      buffer.forEach(({ level, message }) => {
+        consoleHandlers[level.toLowerCase()](message);
+      });
+      tuiHandler = null;
+    }
+    logger.info("Switched to console logging mode");
+  },
+
+  // Get the TUI log handler (if in TUI mode)
+  getTUIHandler: () => tuiHandler,
 };
 
 // Export LOG_LEVELS for external use if needed
