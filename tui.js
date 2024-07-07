@@ -98,14 +98,6 @@ export async function runTUI(config) {
     logger.info("Rendering screen");
     screen.render();
     logger.info("Screen rendered successfully");
-
-    // Keep the screen open
-    screen.key(["q", "C-c"], function (ch, key) {
-      return process.exit(0);
-    });
-
-    // Instead of returning, we'll use a promise that never resolves
-    return new Promise(() => {});
   } catch (error) {
     logger.switchToConsoleMode();
     logger.error("An error occurred in runTUI:", error.message);
@@ -265,7 +257,7 @@ function createMenu(
         toggleFilter(screen, layout, config, files, "disableConfigFilter"),
       "Toggle Token Filter": () =>
         toggleFilter(screen, layout, config, files, "disableTokenFilter"),
-      Help: () => showHelp(screen),
+      Help: () => showHelp(screen, layout),
       Quit: () => process.exit(0),
     },
   });
@@ -306,21 +298,21 @@ function setupEventHandlers(
     }
   });
 
-  screen.key("l", () =>
+  screen.key("4", () =>
     toggleFilter(screen, layout, config, files, "disableLanguageFilter"),
   );
-  screen.key("c", () =>
+  screen.key("5", () =>
     toggleFilter(screen, layout, config, files, "disableConfigFilter"),
   );
-  screen.key("t", () =>
+  screen.key("6", () =>
     toggleFilter(screen, layout, config, files, "disableTokenFilter"),
   );
 
   screen.key("e", () =>
     showExportedCommand(screen, generateEquivalentCommand(config)),
   );
-  screen.key("?", () => showHelp(screen));
-  screen.key(["escape", "q", "C-c"], () => process.exit(0));
+  screen.key(["7", "?"], () => showHelp(screen));
+  screen.key(["q", "C-c"], () => process.exit(0));
 }
 
 // Navigation setup (new)
@@ -349,53 +341,50 @@ function setupNavigation(screen, layout, config, files, filteredFiles) {
   });
 }
 
-// Help menu (modified)
-function showHelp(screen) {
-  const helpBox = blessed.box({
-    parent: screen,
-    top: "center",
-    left: "center",
-    width: "80%",
-    height: "80%",
-    border: {
-      type: "line",
-    },
-    label: " Help ",
-    content: `
-      Code Contextor TUI Help:
-
-      Navigation:
-      - Up/Down: Navigate file tree
-      - Enter: Select file/directory
-
-      Commands:
-      - 1: Change Tokenizer
-      - 2: Change Export Format
-      - 3: Export
-      - 4: Toggle Language Filter
-      - 5: Toggle Config Filter
-      - 6: Toggle Token Filter
-      - ?: Show this help menu
-      - q: Quit the application
-
-      Press Esc to close this help menu
-    `,
-    style: {
+function showHelp(screen, layout) {
+  if (layout.helpBox) {
+    screen.remove(layout.helpBox);
+    layout.helpBox = null;
+  } else {
+    layout.helpBox = blessed.box({
+      parent: screen,
+      top: "center",
+      left: "center",
+      width: "80%",
+      height: "80%",
       border: {
-        fg: "white",
+        type: "line",
       },
-    },
-  });
+      label: " Help ",
+      content: `
+        Code Contextor TUI Help:
 
-  helpBox.key(["escape", "q", "?"], () => {
-    screen.remove(helpBox);
-    screen.render();
-  });
+        Navigation:
+        - Up/Down: Navigate file tree
+        - Enter: Select file/directory
 
+        Commands:
+        - 1: Change Tokenizer
+        - 2: Change Export Format
+        - 3: Export
+        - 4: Toggle Language Filter
+        - 5: Toggle Config Filter
+        - 6: Toggle Token Filter
+        - 7 or ?: Show/hide this help menu
+        - q: Quit the application
+
+        Press 7 or ? to close this help menu
+      `,
+      style: {
+        border: {
+          fg: "white",
+        },
+      },
+    });
+  }
   screen.render();
 }
 
-// Tokenizer change
 async function changeTokenizer(screen, layout, config, files) {
   const tokenizerList = blessed.list({
     parent: screen,
@@ -414,6 +403,8 @@ async function changeTokenizer(screen, layout, config, files) {
         fg: "white",
       },
     },
+    keys: true,
+    vi: true,
   });
 
   tokenizerList.on("select", async (item) => {
@@ -466,6 +457,8 @@ function changeExportFormat(
         fg: "white",
       },
     },
+    keys: true,
+    vi: true,
   });
 
   formatList.on("select", (item) => {
@@ -481,7 +474,6 @@ function changeExportFormat(
   formatList.focus();
   screen.render();
 }
-
 // Output export
 async function exportOutput(screen, layout, config, filteredFiles) {
   const exportMenu = blessed.list({
