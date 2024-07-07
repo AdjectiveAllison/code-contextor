@@ -1,5 +1,7 @@
 import { logger } from "../utils/logger.js";
 
+const AVAILABLE_FORMATS = ["xml", "json", "codeblocks"];
+
 export function formatOutput(files, format) {
   logger.info(`Formatting output in ${format} format`);
 
@@ -13,6 +15,10 @@ export function formatOutput(files, format) {
     default:
       throw new Error(`Unsupported format: ${format}`);
   }
+}
+
+export function getAvailableFormats() {
+  return AVAILABLE_FORMATS;
 }
 
 function formatXml(files) {

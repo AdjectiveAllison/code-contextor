@@ -2,11 +2,12 @@ import blessed from "blessed";
 import { processFiles } from "./core/fileProcessor.js";
 import { tokenizeFiles } from "./core/tokenizer.js";
 import { applyFilters } from "./core/filter.js";
-import { formatOutput } from "./core/formatter.js";
+import { formatOutput, getAvailableFormats } from "./core/formatter.js";
 import { logger } from "./utils/logger.js";
-import { getTokenizerDescription } from "./utils/config.js";
+import { getTokenizerDescription, TOKENIZER_OPTIONS } from "./utils/config.js";
 import fs from "fs/promises";
 import path from "path";
+import clipboardy from "clipboardy";
 
 export async function runTUI(config) {
   let screen;
@@ -134,6 +135,32 @@ function createLayout(screen) {
       border: { type: "line" },
       content: "Ready",
     }),
+    menu: blessed.listbar({
+      parent: screen,
+      bottom: 3,
+      left: 0,
+      width: "100%",
+      height: 3,
+      style: {
+        bg: "blue",
+        item: {
+          bg: "blue",
+          hover: {
+            bg: "green",
+          },
+        },
+        selected: {
+          bg: "green",
+        },
+      },
+      commands: {
+        "Change Tokenizer": () => changeTokenizer(screen, config),
+        "Change Format": () => changeExportFormat(screen, config),
+        Export: () => exportOutput(screen, config, filteredFiles),
+        Help: () => showHelp(screen),
+        Quit: () => process.exit(0),
+      },
+    }),
   };
 }
 
@@ -183,7 +210,8 @@ function getInfoContent(config, files, filteredFiles, filterResult) {
 
   return `
 Directory: ${config.directory}
-Tokenizer: ${getTokenizerDescription(config.tokenizer)}
+Current Tokenizer: ${getTokenizerDescription(config.tokenizer)}
+Current Format: ${config.format}
 
 Total Files: ${totalFiles}
 Total Tokens: ${totalTokens}
@@ -277,28 +305,173 @@ function toggleFilter(screen, layout, config, files, filterName) {
 }
 
 function showHelp(screen) {
-  blessed.box({
+  const helpBox = blessed.box({
+    parent: screen,
+    top: "center",
+    left: "center",
+    width: "80%",
+    height: "80%",
+    border: {
+      type: "line",
+    },
+    label: " Help ",
+    content: `
+      Code Contextor TUI Help:
+
+      Navigation:
+      - Use arrow keys to navigate
+      - Enter to select
+
+      Commands:
+      - ?: Show this help menu
+      - q or Esc: Quit the application
+
+      Features:
+      - Change Tokenizer: Select a different tokenizer
+      - Change Format: Change the export format
+      - Export: Save to file or copy to clipboard
+
+      Press Esc to close this help menu
+    `,
+    style: {
+      border: {
+        fg: "white",
+      },
+    },
+  });
+
+  helpBox.key(["escape", "q", "?"], () => {
+    screen.remove(helpBox);
+    screen.render();
+  });
+
+  screen.render();
+}
+
+async function changeTokenizer(screen, config) {
+  const tokenizerList = blessed.list({
     parent: screen,
     top: "center",
     left: "center",
     width: "50%",
     height: "50%",
-    border: { type: "line" },
-    content: `
-Help:
-  q, Esc, Ctrl-C: Quit
-  ?: Show this help
-  e: Export command
-  l: Toggle language filter
-  c: Toggle config filter
-  t: Toggle token filter
-  Up/Down: Navigate file tree
-  Enter: Select file/directory
-    `,
+    border: {
+      type: "line",
+    },
+    label: " Select Tokenizer ",
+    items: Object.keys(TOKENIZER_OPTIONS),
     style: {
-      border: { fg: "white" },
+      selected: {
+        bg: "blue",
+        fg: "white",
+      },
     },
   });
+
+  tokenizerList.on("select", async (item) => {
+    config.tokenizer = item.content;
+    screen.remove(tokenizerList);
+    screen.render();
+
+    // Re-run tokenization and filtering
+    updateStatus(layout, "Re-tokenizing files...");
+    files = await tokenizeFiles(files, config.tokenizer);
+    updateFileTree(layout, files);
+
+    updateStatus(layout, "Re-applying filters...");
+    const filterResult = applyFilters(files, config);
+    filteredFiles = filterResult.filteredFiles;
+    updateFileTree(layout, filteredFiles);
+
+    updateStatus(layout, "Ready");
+    updateInfo(
+      layout,
+      getInfoContent(config, files, filteredFiles, filterResult),
+    );
+  });
+
+  tokenizerList.focus();
+  screen.render();
+}
+
+function changeExportFormat(screen, config) {
+  const formatList = blessed.list({
+    parent: screen,
+    top: "center",
+    left: "center",
+    width: "50%",
+    height: "50%",
+    border: {
+      type: "line",
+    },
+    label: " Select Export Format ",
+    items: getAvailableFormats(),
+    style: {
+      selected: {
+        bg: "blue",
+        fg: "white",
+      },
+    },
+  });
+
+  formatList.on("select", (item) => {
+    config.format = item.content;
+    screen.remove(formatList);
+    updateInfo(
+      layout,
+      getInfoContent(config, files, filteredFiles, filterResult),
+    );
+    screen.render();
+  });
+
+  formatList.focus();
+  screen.render();
+}
+
+async function exportOutput(screen, config, filteredFiles) {
+  const exportMenu = blessed.list({
+    parent: screen,
+    top: "center",
+    left: "center",
+    width: "50%",
+    height: "50%",
+    border: {
+      type: "line",
+    },
+    label: " Export Options ",
+    items: ["Save to File", "Copy to Clipboard"],
+    style: {
+      selected: {
+        bg: "blue",
+        fg: "white",
+      },
+    },
+  });
+
+  exportMenu.on("select", async (item) => {
+    screen.remove(exportMenu);
+    const formattedOutput = formatOutput(filteredFiles, config.format);
+
+    if (item.content === "Save to File") {
+      try {
+        await fs.writeFile(config.output, formattedOutput);
+        updateStatus(layout, `Output saved to ${config.output}`);
+      } catch (error) {
+        updateStatus(layout, `Error saving file: ${error.message}`);
+      }
+    } else if (item.content === "Copy to Clipboard") {
+      try {
+        await clipboardy.write(formattedOutput);
+        updateStatus(layout, "Output copied to clipboard");
+      } catch (error) {
+        updateStatus(layout, `Error copying to clipboard: ${error.message}`);
+      }
+    }
+
+    screen.render();
+  });
+
+  exportMenu.focus();
   screen.render();
 }
 
