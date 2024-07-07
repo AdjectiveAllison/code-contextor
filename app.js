@@ -69,9 +69,11 @@ async function main() {
     } else {
       logger.info("Starting TUI mode...");
       await runTUI(config);
+      // The following line will never be reached in TUI mode
       logger.info("TUI mode ended.");
     }
 
+    // This line will only be reached in non-interactive mode
     logger.info("Code Contextor finished successfully");
   } catch (error) {
     logger.error("An error occurred:", error.message);

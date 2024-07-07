@@ -9,7 +9,6 @@ import fs from "fs/promises";
 import path from "path";
 import clipboardy from "clipboardy";
 
-// Color scheme definition (new)
 const COLORS = {
   background: "black",
   border: "white",
@@ -18,61 +17,80 @@ const COLORS = {
   text: "white",
 };
 
-// Main TUI function
+function applyColorScheme(layout) {
+  Object.values(layout).forEach((element) => {
+    if (element.style) {
+      element.style.bg = COLORS.background;
+      element.style.fg = COLORS.text;
+      if (element.style.border) {
+        element.style.border.fg = COLORS.border;
+      }
+      if (element.style.selected) {
+        element.style.selected.bg = COLORS.selected;
+      }
+      if (element.style.item && element.style.item.hover) {
+        element.style.item.hover.bg = COLORS.highlight;
+      }
+    }
+  });
+}
+
 export async function runTUI(config) {
-  let screen,
-    layout,
-    files = [],
-    filteredFiles = [];
-
+  let screen;
   try {
-    logger.info("Entering runTUI function");
     logger.switchToTUIMode();
-    logger.info("Switched to TUI mode");
-
-    logger.info("Creating blessed screen");
     screen = blessed.screen({
       smartCSR: true,
       title: "Code Contextor",
-      terminal: "xterm-256color",
-      fullUnicode: true,
     });
-    logger.info("Blessed screen created successfully");
+  } catch (error) {
+    logger.switchToConsoleMode();
+    logger.error("Failed to create blessed screen:", error.message);
+    console.error(
+      "Your terminal might not be fully compatible with the TUI mode.",
+    );
+    console.error(
+      "Please try running in non-interactive mode with --non-interactive flag.",
+    );
+    process.exit(1);
+  }
 
-    // Process files
-    logger.info("Processing files");
+  const layout = createLayout(screen, files);
+  layout.menu = createMenu(screen, config, onAction);
+  applyColorScheme(layout);
+  let files = [];
+  let filteredFiles = [];
+
+  screen.key(["escape", "q", "C-c"], () => {
+    logger.switchToConsoleMode();
+    process.exit(0);
+  });
+  screen.key("?", () => showHelp(screen));
+
+  try {
+    updateStatus(layout, "Processing files...");
     files = await processFiles(config.directory, config);
-    logger.info("Files processed successfully");
+    updateFileTree(layout, files);
 
-    // Tokenize files
-    logger.info("Tokenizing files");
+    updateStatus(layout, "Tokenizing files...");
     files = await tokenizeFiles(files, config.tokenizer);
-    logger.info("Files tokenized successfully");
+    updateFileTree(layout, files);
 
-    // Apply filters
-    logger.info("Applying filters");
+    updateStatus(layout, "Applying filters...");
     const filterResult = applyFilters(files, config);
     filteredFiles = filterResult.filteredFiles;
-    logger.info("Filters applied successfully");
-
-    // Create layout
-    logger.info("Creating layout");
-    layout = createLayout(screen, filteredFiles);
-    applyColorScheme(layout);
-    logger.info("Layout created and color scheme applied");
-
-    // Update status and views
-    logger.info("Updating views");
-    updateStatus(layout, "Processing complete");
     updateFileTree(layout, filteredFiles);
+
+    updateStatus(layout, "Ready");
     updateInfo(
       layout,
       getInfoContent(config, files, filteredFiles, filterResult),
     );
-    logger.info("Views updated successfully");
 
-    // Setup event handlers and navigation
-    logger.info("Setting up event handlers and navigation");
+    applyColorScheme(layout);
+
+    setupNavigation(screen, layout, config, files, filteredFiles);
+
     setupEventHandlers(
       screen,
       layout,
@@ -81,99 +99,160 @@ export async function runTUI(config) {
       filteredFiles,
       filterResult,
     );
-    setupNavigation(screen, layout, config, files, filteredFiles);
-    logger.info("Event handlers and navigation set up successfully");
 
     // Start log update interval
-    logger.info("Starting log update interval");
     const logUpdateInterval = setInterval(() => updateLogView(layout), 1000);
-    logger.info("Log update interval started");
+
+    setupNavigation(screen, layout, config, files, filteredFiles);
+
+    const onAction = (action) => {
+      switch (action) {
+        case "changeTokenizer":
+          changeTokenizer(screen, config);
+          break;
+        case "changeFormat":
+          changeExportFormat(screen, config);
+          break;
+        case "export":
+          exportOutput(screen, config, filteredFiles);
+          break;
+        case "toggleLanguageFilter":
+          toggleFilter(screen, layout, config, files, "disableLanguageFilter");
+          break;
+        case "toggleConfigFilter":
+          toggleFilter(screen, layout, config, files, "disableConfigFilter");
+          break;
+        case "toggleTokenFilter":
+          toggleFilter(screen, layout, config, files, "disableTokenFilter");
+          break;
+        case "help":
+          showHelp(screen);
+          break;
+        case "quit":
+          process.exit(0);
+      }
+    };
+
+    const layout = createLayout(screen, files);
+    layout.menu = createMenu(screen, config, onAction);
 
     screen.on("destroy", () => {
       clearInterval(logUpdateInterval);
       logger.switchToConsoleMode();
-      logger.info("Screen destroyed, switched back to console mode");
     });
 
-    logger.info("Rendering screen");
     screen.render();
-    logger.info("Screen rendered successfully");
-
-    // Keep the screen open
-    screen.key(["q", "C-c"], function (ch, key) {
-      return process.exit(0);
-    });
-
-    // Instead of returning, we'll use a promise that never resolves
-    return new Promise(() => {});
   } catch (error) {
-    logger.switchToConsoleMode();
-    logger.error("An error occurred in runTUI:", error.message);
-    console.error("Error stack:", error.stack);
-    console.error(
-      "Please try running in non-interactive mode with --non-interactive flag.",
-    );
-    process.exit(1);
+    logger.error("An error occurred:", error.message);
+    updateStatus(layout, `Error: ${error.message}`);
   }
 }
-// Layout creation (modified)
+
+function createMenu(screen, config, onAction) {
+  const menu = blessed.listbar({
+    parent: screen,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    mouse: true,
+    keys: true,
+    autoCommandKeys: true,
+    border: "line",
+    style: {
+      bg: "blue",
+      item: {
+        bg: "blue",
+        hover: {
+          bg: "green",
+        },
+      },
+      selected: {
+        bg: "green",
+      },
+    },
+    commands: {
+      "Change Tokenizer": () => onAction("changeTokenizer"),
+      "Change Format": () => onAction("changeFormat"),
+      Export: () => onAction("export"),
+      "Toggle Lang Filter": () => onAction("toggleLanguageFilter"),
+      "Toggle Config Filter": () => onAction("toggleConfigFilter"),
+      "Toggle Token Filter": () => onAction("toggleTokenFilter"),
+      Help: () => onAction("help"),
+      Quit: () => onAction("quit"),
+    },
+  });
+
+  return menu;
+}
+
 function createLayout(screen, files) {
   return {
     screen,
-    fileTree: blessed.box({
-      parent: screen,
-      left: 0,
-      top: 0,
-      width: "50%",
-      height: "70%",
-      content: "File Tree",
-      border: { type: "line" },
-      label: " File Tree ",
-    }),
+    fileTree: createFileTree(screen, files),
     info: blessed.box({
       parent: screen,
       right: 0,
       top: 0,
       width: "50%",
       height: "70%",
-      content: "Select a file or directory for more information",
       border: { type: "line" },
       label: " Info ",
+      content: "Select a file or directory for more information",
+      padding: 1,
+      scrollable: true,
+      alwaysScroll: true,
+      scrollbar: { ch: " ", bg: "cyan" },
     }),
-    logView: blessed.box({
+    logView: blessed.log({
       parent: screen,
       bottom: 3,
       left: 0,
       width: "100%",
       height: "30%-3",
-      content: "Logs",
       border: { type: "line" },
       label: " Logs ",
       scrollable: true,
       alwaysScroll: true,
-      scrollbar: {
-        ch: " ",
-        track: {
-          bg: "cyan",
-        },
-        style: {
-          inverse: true,
-        },
-      },
+      scrollbar: { ch: " ", bg: "cyan" },
     }),
     status: blessed.box({
       parent: screen,
       bottom: 0,
       width: "100%",
       height: 3,
-      content: "Ready",
       border: { type: "line" },
+      content: "Ready",
     }),
-    menu: createMenu(screen),
+    menu: blessed.listbar({
+      parent: screen,
+      bottom: 3,
+      left: 0,
+      width: "100%",
+      height: 3,
+      style: {
+        bg: "blue",
+        item: {
+          bg: "blue",
+          hover: {
+            bg: "green",
+          },
+        },
+        selected: {
+          bg: "green",
+        },
+      },
+      commands: {
+        "Change Tokenizer": () => changeTokenizer(screen, config),
+        "Change Format": () => changeExportFormat(screen, config),
+        Export: () => exportOutput(screen, config, filteredFiles),
+        Help: () => showHelp(screen),
+        Quit: () => process.exit(0),
+      },
+    }),
   };
 }
 
-// File tree creation (new)
 function createFileTree(screen, files) {
   const fileTree = blessed.tree({
     parent: screen,
@@ -216,114 +295,73 @@ function createFileTree(screen, files) {
   return fileTree;
 }
 
-// Menu creation
-function createMenu(
-  screen,
-  layout,
-  config,
-  files,
-  filteredFiles,
-  filterResult,
-) {
-  return blessed.listbar({
-    parent: screen,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 3,
-    mouse: true,
-    keys: true,
-    autoCommandKeys: true,
-    border: "line",
-    style: {
-      bg: "blue",
-      item: {
-        bg: "blue",
-        hover: {
-          bg: "green",
-        },
-      },
-      selected: {
-        bg: "green",
-      },
-    },
-    commands: {
-      "Change Tokenizer": () => changeTokenizer(screen, layout, config, files),
-      "Change Format": () =>
-        changeExportFormat(
-          screen,
-          layout,
-          config,
-          files,
-          filteredFiles,
-          filterResult,
-        ),
-      Export: () => exportOutput(screen, layout, config, filteredFiles),
-      "Toggle Lang Filter": () =>
-        toggleFilter(screen, layout, config, files, "disableLanguageFilter"),
-      "Toggle Config Filter": () =>
-        toggleFilter(screen, layout, config, files, "disableConfigFilter"),
-      "Toggle Token Filter": () =>
-        toggleFilter(screen, layout, config, files, "disableTokenFilter"),
-      Help: () => showHelp(screen),
-      Quit: () => process.exit(0),
-    },
-  });
+function updateFileTree(layout, files) {
+  let content = "";
+  function traverseFiles(files, indent = "") {
+    files.forEach((file) => {
+      const icon = file.isDirectory ? "📁" : "📄";
+      const tokenInfo =
+        file.tokenCount !== undefined ? ` (${file.tokenCount} tokens)` : "";
+      content += `${indent}${icon} ${file.path}${tokenInfo}\n`;
+      if (file.isDirectory && file.children) {
+        traverseFiles(file.children, indent + "  ");
+      }
+    });
+  }
+  traverseFiles(files);
+  layout.fileTree.setContent(content);
 }
 
-// Color scheme application (new)
-function applyColorScheme(layout) {
-  Object.values(layout).forEach((element) => {
-    if (element.style) {
-      element.style.bg = COLORS.background;
-      element.style.fg = COLORS.text;
-      if (element.style.border) {
-        element.style.border.fg = COLORS.border;
-      }
-      if (element.style.selected) {
-        element.style.selected.bg = COLORS.selected;
-      }
-      if (element.style.item && element.style.item.hover) {
-        element.style.item.hover.bg = COLORS.highlight;
-      }
-    }
-  });
+function updateStatus(layout, message) {
+  layout.status.setContent(message);
+  layout.screen.render();
 }
 
-// Event handlers setup
-function setupEventHandlers(
-  screen,
-  layout,
-  config,
-  files,
-  filteredFiles,
-  filterResult,
-) {
-  layout.fileTree.on("select", (node) => {
-    const selectedFile = findFile(files, node.name.split(" ")[0]);
-    if (selectedFile) {
-      updateInfo(layout, getFileInfo(selectedFile));
-    }
-  });
-
-  screen.key("l", () =>
-    toggleFilter(screen, layout, config, files, "disableLanguageFilter"),
-  );
-  screen.key("c", () =>
-    toggleFilter(screen, layout, config, files, "disableConfigFilter"),
-  );
-  screen.key("t", () =>
-    toggleFilter(screen, layout, config, files, "disableTokenFilter"),
-  );
-
-  screen.key("e", () =>
-    showExportedCommand(screen, generateEquivalentCommand(config)),
-  );
-  screen.key("?", () => showHelp(screen));
-  screen.key(["escape", "q", "C-c"], () => process.exit(0));
+function updateInfo(layout, content) {
+  layout.info.setContent(content);
+  layout.screen.render();
 }
 
-// Navigation setup (new)
+function updateLogView(layout) {
+  const tuiHandler = logger.getTUIHandler();
+  if (tuiHandler) {
+    const latestLogs = tuiHandler.getLatestLogs(10);
+    latestLogs.forEach((log) => {
+      layout.logView.log(log.message);
+    });
+    layout.screen.render();
+  }
+}
+
+function getInfoContent(config, files, filteredFiles, filterResult) {
+  const totalFiles = countFiles(files);
+  const totalTokens = calculateTotalTokens(files);
+  const filteredTotalFiles = countFiles(filteredFiles);
+  const filteredTotalTokens = calculateTotalTokens(filteredFiles);
+
+  return `
+Directory: ${config.directory}
+Current Tokenizer: ${getTokenizerDescription(config.tokenizer)}
+Current Format: ${config.format}
+
+Total Files: ${totalFiles}
+Total Tokens: ${totalTokens}
+
+Filtered Files: ${filteredTotalFiles}
+Filtered Tokens: ${filteredTotalTokens}
+
+Removed Files:
+  Language-specific: ${filterResult.removedFiles.languageSpecific.length}
+  Configuration: ${filterResult.removedFiles.configurationFiles.length}
+  Token Anomaly: ${filterResult.removedFiles.tokenAnomaly.length}
+
+Detected Language: ${filterResult.detectedLanguage}
+
+Press 'e' to export command
+Press '?' for help
+  `;
+}
+
 function setupNavigation(screen, layout, config, files, filteredFiles) {
   layout.fileTree.on("select", (node) => {
     const selectedFile = findFile(files, node.name.split(" ")[0]);
@@ -345,11 +383,83 @@ function setupNavigation(screen, layout, config, files, filteredFiles) {
       "toggleConfigFilter",
       "toggleTokenFilter",
     ];
-    layout.menu.emit("select", {}, layout.menu.items[parseInt(ch) - 1]);
+    onAction(actions[parseInt(ch) - 1]);
   });
 }
 
-// Help menu (modified)
+function setupEventHandlers(
+  screen,
+  layout,
+  config,
+  files,
+  filteredFiles,
+  filterResult,
+) {
+  layout.fileTree.on("select", (node) => {
+    const selectedFile = findFile(files, node.content.split(" ")[1]);
+    if (selectedFile) {
+      updateInfo(layout, getFileInfo(selectedFile));
+    }
+  });
+
+  screen.key("e", () =>
+    showExportedCommand(screen, generateEquivalentCommand(config)),
+  );
+
+  screen.key("l", () =>
+    toggleFilter(screen, layout, config, files, "disableLanguageFilter"),
+  );
+  screen.key("c", () =>
+    toggleFilter(screen, layout, config, files, "disableConfigFilter"),
+  );
+  screen.key("t", () =>
+    toggleFilter(screen, layout, config, files, "disableTokenFilter"),
+  );
+}
+
+function findFile(files, path) {
+  for (const file of files) {
+    if (file.path === path) return file;
+    if (file.isDirectory && file.children) {
+      const found = findFile(file.children, path);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function getFileInfo(file) {
+  if (file.isDirectory) {
+    return `
+Directory: ${file.path}
+Total Files: ${countFiles(file.children)}
+Total Tokens: ${file.tokenCount}
+    `;
+  } else {
+    return `
+File: ${file.path}
+Tokens: ${file.tokenCount}
+Content Preview:
+${file.content.slice(0, 500)}${file.content.length > 500 ? "..." : ""}
+    `;
+  }
+}
+
+function toggleFilter(screen, layout, config, files, filterName) {
+  config[filterName] = !config[filterName];
+  const filterResult = applyFilters(files, config);
+  updateFileTree(layout, filterResult.filteredFiles);
+  updateInfo(
+    layout,
+    getInfoContent(config, files, filterResult.filteredFiles, filterResult),
+  );
+  updateStatus(
+    layout,
+    `${filterName} ${config[filterName] ? "disabled" : "enabled"}`,
+  );
+  screen.render();
+}
+
 function showHelp(screen) {
   const helpBox = blessed.box({
     parent: screen,
@@ -394,9 +504,7 @@ function showHelp(screen) {
 
   screen.render();
 }
-
-// Tokenizer change
-async function changeTokenizer(screen, layout, config, files) {
+async function changeTokenizer(screen, config) {
   const tokenizerList = blessed.list({
     parent: screen,
     top: "center",
@@ -424,9 +532,11 @@ async function changeTokenizer(screen, layout, config, files) {
     // Re-run tokenization and filtering
     updateStatus(layout, "Re-tokenizing files...");
     files = await tokenizeFiles(files, config.tokenizer);
+    updateFileTree(layout, files);
 
+    updateStatus(layout, "Re-applying filters...");
     const filterResult = applyFilters(files, config);
-    const filteredFiles = filterResult.filteredFiles;
+    filteredFiles = filterResult.filteredFiles;
     updateFileTree(layout, filteredFiles);
 
     updateStatus(layout, "Ready");
@@ -440,15 +550,7 @@ async function changeTokenizer(screen, layout, config, files) {
   screen.render();
 }
 
-// Export format change
-function changeExportFormat(
-  screen,
-  layout,
-  config,
-  files,
-  filteredFiles,
-  filterResult,
-) {
+function changeExportFormat(screen, config) {
   const formatList = blessed.list({
     parent: screen,
     top: "center",
@@ -482,8 +584,7 @@ function changeExportFormat(
   screen.render();
 }
 
-// Output export
-async function exportOutput(screen, layout, config, filteredFiles) {
+async function exportOutput(screen, config, filteredFiles) {
   const exportMenu = blessed.list({
     parent: screen,
     top: "center",
@@ -528,117 +629,6 @@ async function exportOutput(screen, layout, config, filteredFiles) {
 
   exportMenu.focus();
   screen.render();
-}
-
-// Filter toggle
-function toggleFilter(screen, layout, config, files, filterName) {
-  config[filterName] = !config[filterName];
-  const filterResult = applyFilters(files, config);
-  const filteredFiles = filterResult.filteredFiles;
-  updateFileTree(layout, filteredFiles);
-  updateInfo(
-    layout,
-    getInfoContent(config, files, filteredFiles, filterResult),
-  );
-  updateStatus(
-    layout,
-    `${filterName} ${config[filterName] ? "disabled" : "enabled"}`,
-  );
-  screen.render();
-}
-
-function updateFileTree(layout, files) {
-  let content = "";
-  function traverseFiles(files, indent = "") {
-    files.forEach((file) => {
-      const icon = file.isDirectory ? "📁" : "📄";
-      const tokenInfo =
-        file.tokenCount !== undefined ? ` (${file.tokenCount} tokens)` : "";
-      content += `${indent}${icon} ${file.path}${tokenInfo}\n`;
-      if (file.isDirectory && file.children) {
-        traverseFiles(file.children, indent + "  ");
-      }
-    });
-  }
-  traverseFiles(files);
-  layout.fileTree.setContent(content);
-}
-
-function updateStatus(layout, message) {
-  layout.status.setContent(message);
-  layout.screen.render();
-}
-
-function updateInfo(layout, content) {
-  layout.info.setContent(content);
-  layout.screen.render();
-}
-
-function updateLogView(layout) {
-  const tuiHandler = logger.getTUIHandler();
-  if (tuiHandler) {
-    const latestLogs = tuiHandler.getLatestLogs(10);
-    const logContent = latestLogs.map((log) => log.message).join("\n");
-    layout.logView.setContent(logContent);
-    layout.screen.render();
-  }
-}
-
-function getInfoContent(config, files, filteredFiles, filterResult) {
-  const totalFiles = countFiles(files);
-  const totalTokens = calculateTotalTokens(files);
-  const filteredTotalFiles = countFiles(filteredFiles);
-  const filteredTotalTokens = calculateTotalTokens(filteredFiles);
-
-  return `
-Directory: ${config.directory}
-Current Tokenizer: ${getTokenizerDescription(config.tokenizer)}
-Current Format: ${config.format}
-
-Total Files: ${totalFiles}
-Total Tokens: ${totalTokens}
-
-Filtered Files: ${filteredTotalFiles}
-Filtered Tokens: ${filteredTotalTokens}
-
-Removed Files:
-  Language-specific: ${filterResult.removedFiles.languageSpecific.length}
-  Configuration: ${filterResult.removedFiles.configurationFiles.length}
-  Token Anomaly: ${filterResult.removedFiles.tokenAnomaly.length}
-
-Detected Language: ${filterResult.detectedLanguage}
-
-Press 'e' to export command
-Press '?' for help
-  `;
-}
-
-function findFile(files, path) {
-  for (const file of files) {
-    if (file.path === path) return file;
-    if (file.isDirectory && file.children) {
-      const found = findFile(file.children, path);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function getFileInfo(file) {
-  if (file.isDirectory) {
-    return `
-Directory: ${file.path}
-Total Files: ${countFiles(file.children)}
-Total Tokens: ${file.tokenCount}
-    `;
-  } else {
-    return `
-File: ${file.path}
-Tokens: ${file.tokenCount}
-Content Preview:
-${file.content.slice(0, 500)}${file.content.length > 500 ? "..." : ""}
-    `;
-  }
 }
 
 function showExportedCommand(screen, command) {
