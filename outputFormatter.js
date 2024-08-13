@@ -1,7 +1,7 @@
 export function formatOutput(file, format) {
   switch (format) {
     case "xml":
-      return `<file>\n<path>${escapeXml(file.path)}</path>\n<content>${escapeXml(file.content)}</content>\n</file>`;
+      return `<file: ${file.path}>${file.content}\n</file: ${file.path}>`;
     case "json":
       return JSON.stringify({ path: file.path, content: file.content });
     case "codeblocks":
@@ -9,21 +9,4 @@ export function formatOutput(file, format) {
     default:
       throw new Error(`Unsupported format: ${format}`);
   }
-}
-
-function escapeXml(unsafe) {
-  return unsafe.replace(/[<>&'"]/g, (c) => {
-    switch (c) {
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case "&":
-        return "&amp;";
-      case "'":
-        return "&apos;";
-      case '"':
-        return "&quot;";
-    }
-  });
 }
