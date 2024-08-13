@@ -128,3 +128,5 @@ dist/
 # Default output file
 output.txt
 .aider*
+code-contextor
+coco

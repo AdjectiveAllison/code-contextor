@@ -1,8 +1,10 @@
+#!/usr/bin/env node
 import fs from "fs";
 import path from "path";
 import { program } from "commander";
+import clipboardy from "clipboardy";
 import { tokenize } from "./tokenizer.js";
-import { processDirectory } from "./fileProcessor.js";
+import { processDirectoryOrPaths } from "./fileProcessor.js";
 import { formatOutput } from "./outputFormatter.js";
 import { filterFiles } from "./fileFilter.js";
 
@@ -24,7 +26,7 @@ const TOKENIZER_OPTIONS = Object.freeze({
 
 program
   .version("0.1.0")
-  .option("-d, --directory <path>", "Target directory", process.cwd())
+  .arguments("[paths...]")
   .option(
     "-e, --extensions <extensions>",
     "File extensions to include (comma-separated)",
@@ -41,11 +43,6 @@ program
   )
   .option("-t, --tokenizer <model>", "Tokenizer model to use", "Xenova/gpt-4")
   .option(
-    "-o, --output <file>",
-    "Output file for formatted content",
-    "output.txt",
-  )
-  .option(
     "--disable-language-filter",
     "Disable language-specific file filtering",
   )
@@ -58,6 +55,7 @@ program
   .parse(process.argv);
 
 const options = program.opts();
+const paths = program.args.length > 0 ? program.args : [process.cwd()];
 
 function printFileStructure(files) {
   const structure = {};
@@ -89,10 +87,9 @@ function printFileStructure(files) {
 
 async function main() {
   try {
-    let files = await processDirectory(options.directory, {
+    const files = await processDirectoryOrPaths(paths, {
       extensions: options.extensions ? options.extensions.split(",") : null,
       ignorePatterns: options.ignore ? options.ignore.split(",") : null,
-      outputFile: path.resolve(options.output),
       includeDotFiles: options.includeDotFiles
         ? options.includeDotFiles.split(",")
         : [],
@@ -180,9 +177,9 @@ async function main() {
     );
     console.log(`\nTotal tokens after filtering: ${filteredTotalTokens}`);
 
-    // Write formatted output to file
-    fs.writeFileSync(options.output, formattedOutput);
-    console.log(`\nFormatted output written to: ${options.output}`);
+    // Copy formatted output to clipboard
+    await clipboardy.write(formattedOutput);
+    console.log("\nFormatted output has been copied to the clipboard.");
   } catch (error) {
     console.error("An error occurred:", error.message);
   }

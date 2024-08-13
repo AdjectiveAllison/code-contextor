@@ -77,7 +77,8 @@ function isTextFile(filePath) {
   }
 }
 
-export async function processDirectory(directory, options) {
+export async function processDirectoryOrPaths(paths, options) {
+  const files = [];
   const ig = ignore();
 
   // Add default ignore patterns
@@ -85,22 +86,6 @@ export async function processDirectory(directory, options) {
 
   // Ignore all dot files and directories by default
   ig.add(".*");
-
-  // Add the output file to ignore patterns
-  if (options.outputFile) {
-    ig.add(path.relative(directory, options.outputFile));
-  }
-
-  // Read .gitignore file if it exists
-  try {
-    const gitignorePath = path.join(directory, ".gitignore");
-    const gitignoreContent = await fs.readFile(gitignorePath, "utf-8");
-    ig.add(gitignoreContent);
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      console.warn(`Warning: Error reading .gitignore file: ${error.message}`);
-    }
-  }
 
   // Add user-specified ignore patterns
   if (options.ignorePatterns) {
@@ -114,38 +99,62 @@ export async function processDirectory(directory, options) {
     });
   }
 
-  const files = [];
+  for (const itemPath of paths) {
+    const stat = await fs.stat(itemPath);
 
-  async function traverse(dir) {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      const relativePath = path.relative(directory, fullPath);
-
-      if (ig.ignores(relativePath)) continue;
-
-      if (entry.isDirectory()) {
-        await traverse(fullPath);
-      } else if (entry.isFile()) {
-        if (
-          options.extensions &&
-          !options.extensions.includes(path.extname(entry.name).slice(1))
-        ) {
-          continue;
+    if (stat.isDirectory()) {
+      // Read .gitignore file if it exists in the directory
+      try {
+        const gitignorePath = path.join(itemPath, ".gitignore");
+        const gitignoreContent = await fs.readFile(gitignorePath, "utf-8");
+        ig.add(gitignoreContent);
+      } catch (error) {
+        if (error.code !== "ENOENT") {
+          console.warn(
+            `Warning: Error reading .gitignore file in ${itemPath}: ${error.message}`,
+          );
         }
-
-        if (!isTextFile(fullPath)) {
-          console.log(`Skipping non-text file: ${relativePath}`);
-          continue;
-        }
-
-        const content = await fs.readFile(fullPath, "utf-8");
-        files.push({ path: relativePath, content });
       }
+
+      await traverseDirectory(itemPath, itemPath, files, ig, options);
+    } else if (stat.isFile()) {
+      await processFile(itemPath, files, options);
     }
   }
 
-  await traverse(directory);
   return files;
+}
+
+async function traverseDirectory(baseDir, currentDir, files, ig, options) {
+  const entries = await fs.readdir(currentDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(currentDir, entry.name);
+    const relativePath = path.relative(baseDir, fullPath);
+
+    if (ig.ignores(relativePath)) continue;
+
+    if (entry.isDirectory()) {
+      await traverseDirectory(baseDir, fullPath, files, ig, options);
+    } else if (entry.isFile()) {
+      await processFile(fullPath, files, options);
+    }
+  }
+}
+
+async function processFile(filePath, files, options) {
+  if (
+    options.extensions &&
+    !options.extensions.includes(path.extname(filePath).slice(1))
+  ) {
+    return;
+  }
+
+  if (!isTextFile(filePath)) {
+    console.log(`Skipping non-text file: ${filePath}`);
+    return;
+  }
+
+  const content = await fs.readFile(filePath, "utf-8");
+  files.push({ path: filePath, content });
 }
