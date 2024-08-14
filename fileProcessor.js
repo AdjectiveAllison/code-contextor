@@ -13,6 +13,7 @@ const DEFAULT_IGNORE_PATTERNS = [
   ".gitattributes",
   ".gitmodules",
   "node_modules",
+  "LICENSE",
 ];
 
 function isTextFile(filePath) {
