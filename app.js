@@ -196,7 +196,7 @@ async function main() {
     );
 
     // Copy formatted output to clipboard
-    await clipboardy.write(formattedOutput);
+    clipboardy.writeSync(formattedOutput);
     console.log("Formatted output has been copied to the clipboard.");
   } catch (error) {
     console.error("An error occurred:", error.message);
