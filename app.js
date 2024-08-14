@@ -99,13 +99,11 @@ async function main() {
     printFileStructure(files);
 
     let totalTokens = 0;
-    let formattedOutput = "";
 
     // Tokenize files
     for (const file of files) {
-      const formattedContent = formatOutput(file, options.format);
       try {
-        const result = await tokenize(formattedContent, options.tokenizer);
+        const result = await tokenize(file.content, options.tokenizer);
         file.tokenCount = result.tokenCount;
         totalTokens += result.tokenCount;
       } catch (error) {
@@ -168,18 +166,38 @@ async function main() {
     console.log("\nIncluded files after filtering:");
     filteredFiles.forEach((file) => {
       console.log(`- ${file.path} (${file.tokenCount} tokens)`);
-      formattedOutput += formatOutput(file, options.format) + "\n\n";
     });
 
     const filteredTotalTokens = filteredFiles.reduce(
       (sum, file) => sum + file.tokenCount,
       0,
     );
-    console.log(`\nTotal tokens after filtering: ${filteredTotalTokens}`);
+
+    // Generate formatted output for all filtered files at once
+    const formattedOutput = formatOutput(filteredFiles, options.format);
+
+    // Calculate token overhead from formatting
+    let formattedTokenCount;
+    try {
+      const formattedTokenResult = await tokenize(
+        formattedOutput,
+        options.tokenizer,
+      );
+      formattedTokenCount = formattedTokenResult.tokenCount;
+    } catch (error) {
+      console.error(`Error tokenizing formatted output: ${error.message}`);
+      formattedTokenCount = filteredTotalTokens; // Fallback to avoid negative overhead
+    }
+
+    const tokenOverhead = formattedTokenCount - filteredTotalTokens;
+
+    console.log(
+      `\n${formattedTokenCount} tokens total, including ${tokenOverhead} from ${options.format} formatting.`,
+    );
 
     // Copy formatted output to clipboard
     await clipboardy.write(formattedOutput);
-    console.log("\nFormatted output has been copied to the clipboard.");
+    console.log("Formatted output has been copied to the clipboard.");
   } catch (error) {
     console.error("An error occurred:", error.message);
   }
