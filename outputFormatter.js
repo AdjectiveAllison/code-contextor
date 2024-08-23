@@ -2,8 +2,7 @@ function formatXml(files) {
   if (files.length === 1) {
     const file = files[0];
     return [
-      "<file>",
-      `  <path>${file.path}</path>`,
+      `<file path="${file.path}">`,
       "  <content><![CDATA[",
       file.content,
       "  ]]></content>",
@@ -14,8 +13,7 @@ function formatXml(files) {
   let output = "<files>\n";
   for (const file of files) {
     output += [
-      "  <file>",
-      `    <path>${file.path}</path>`,
+      `  <file path="${file.path}">`,
       "    <content><![CDATA[",
       file.content,
       "    ]]></content>",
@@ -27,6 +25,46 @@ function formatXml(files) {
   output += files.map((file) => file.path).join("\n");
   output += "\n</file_list>";
   return output;
+}
+
+function formatXmlLineByLine(files) {
+  let output = "<files>\n";
+
+  for (const file of files) {
+    output += `  <file path="${file.path}">\n`;
+    // output += "    <content>\n";
+
+    const lines = file.content.split("\n");
+    lines.forEach((line, lineIndex) => {
+      output += `<line${lineIndex + 1}>${escapeXml(line)}</line${lineIndex + 1}>`;
+    });
+
+    // output += "    </content>\n";
+    output += "  </file>\n";
+  }
+
+  output += "</files>\n";
+  output += "<file_list>\n";
+  output += files.map((file) => file.path).join("\n");
+  output += "\n</file_list>";
+  return output;
+}
+
+function escapeXml(unsafe) {
+  return unsafe.replace(/[<>&'"]/g, function (c) {
+    switch (c) {
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case "&":
+        return "&amp;";
+      case "'":
+        return "&apos;";
+      case '"':
+        return "&quot;";
+    }
+  });
 }
 
 function formatJson(files) {
@@ -55,6 +93,8 @@ export function formatOutput(files, format) {
   switch (format) {
     case "xml":
       return formatXml(files);
+    case "xml-line":
+      return formatXmlLineByLine(files);
     case "json":
       return formatJson(files);
     case "codeblocks":
